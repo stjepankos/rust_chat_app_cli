@@ -9,13 +9,14 @@ const SERVER_ADDR: &str = "127.0.0.1:8000";
 const MSG_SIZE: usize = 32;
 
 fn main() {
-    thread::spawn(move || accept_connections());
+    let accept = thread::spawn(move || accept_connections());
+    accept.join().unwrap();
 }
 
 fn accept_connections() {
     let listener = TcpListener::bind(SERVER_ADDR).expect("Tcp listener failed to bind");
     let (client_sender, server_receiver) = channel();
-
+    println!("Server started, waiting for users..");
     thread::spawn(move || writer_loop(server_receiver));
 
     for stream in listener.incoming() {
@@ -52,12 +53,17 @@ fn writer_loop(receiver: Receiver<Event>) {
                     Entry::Occupied(_) => todo!(),
                     Entry::Vacant(_) => {
                         let (client_sender, client_receiver) = channel();
+                        println!("New user connected: {name}");
                         clients.insert(name, client_sender);
                         thread::spawn(move || connection_writer_loop(stream, client_receiver));
                     }
                 },
                 Event::Message { from, msg } => {
-                    for (_name, stream) in &clients {
+                    println!("Message -> {from}: {msg}");
+                    for (name, stream) in &clients {
+                        if name == &from {
+                            continue;
+                        }
                         stream
                             .send(format!("{}: {}", from, msg))
                             .expect("Error sending message to other clients.");
@@ -78,15 +84,15 @@ fn connection_loop(client_sender: Sender<Event>, stream: TcpStream) {
         Ok(_) => {
             let message = buf.into_iter().take_while(|&x| x != 0).collect();
             match String::from_utf8(message) {
-                Ok(message) => {
-                    let mut split = message.split(":");
+                Ok(init_message) => {
                     client_sender
-                        .send(Event::Message {
-                            from: split.next().unwrap().to_string(),
-                            msg: split.next().unwrap().to_string(),
+                        .send(Event::NewPeer {
+                            name: init_message,
+                            stream: stream.clone(),
                         })
                         .unwrap();
                 }
+
                 Err(_) => println!("Error converting a message to UTF-8"),
             }
         }
@@ -98,11 +104,12 @@ fn connection_loop(client_sender: Sender<Event>, stream: TcpStream) {
             Ok(_) => {
                 let message = buf.into_iter().take_while(|&x| x != 0).collect();
                 match String::from_utf8(message) {
-                    Ok(init_message) => {
+                    Ok(message) => {
+                        let mut split = message.split(":");
                         client_sender
-                            .send(Event::NewPeer {
-                                name: init_message,
-                                stream: stream.clone(),
+                            .send(Event::Message {
+                                from: split.next().unwrap().to_string(),
+                                msg: split.next().unwrap().to_string(),
                             })
                             .unwrap();
                     }
@@ -125,7 +132,7 @@ fn connection_writer_loop(stream: Arc<TcpStream>, receiver: Receiver<String>) {
                     .write(&buf)
                     .expect("Error writing the message to client");
             }
-            Err(_) => println!("Erorr getting message from recv_channel"),
+            Err(_) => println!("Error getting message from recv_channel"),
         }
     }
 }

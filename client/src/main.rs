@@ -27,7 +27,6 @@ fn main() {
         match reader_stream.read_exact(&mut buf) {
             Ok(_) => {
                 let message = buf.into_iter().take_while(|&x| x != 0).collect();
-                println!("new message incoming");
                 match String::from_utf8(message) {
                     Ok(message) => println!("{}", message),
                     Err(_) => println!("Error converting the message to utf-8"),
@@ -46,17 +45,27 @@ fn main() {
             .expect("Error sending the message to the server");
     });
 
+    println!("Enter your name:");
+    let stdin = io::stdin();
+    let mut name = String::new();
+    stdin.read_line(&mut name).unwrap();
+    name = name.trim().to_string();
+    tx.send(name.clone()).unwrap();
+
+    println!("Welcome to the chat!");
     loop {
+        let name = name.clone();
         let mut message = String::new();
-        println!("Enter a message: ");
         let stdin = io::stdin();
         stdin.read_line(&mut message).unwrap();
         message = message.trim().to_string();
+        let full_message = name + ":" + &message;
         if message == "quit" {
             break;
         }
         //println!("The message is: {}", message);
-        tx.send(message).expect("Error sending message to channel");
+        tx.send(full_message)
+            .expect("Error sending message to channel");
     }
     println!("Goodbye!");
 }
